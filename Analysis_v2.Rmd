@@ -1,0 +1,427 @@
+---
+title: "Data analysis with ampvis2"
+date: "8 May 2018"
+output: html_document
+---
+### Intro 
+
+Data analysis carried out in this markdown file relates to the article *Investigation of Detection Limits and the Influence of DNA Extraction and Primer Choice on the Observed Microbial Communities in Drinking Water Samples using 16S rRNA Gene Amplicon Sequencing*.
+This study investigated the impact of DNA extraction method and primer choice on the observed microbial community as well as estimating a lower detection limit from 16s rRNA amlicon gene sequencing. The significance of extraction method was investigated by comparing the two commercial DNA extraction kits FastDNA SPIN Kit for Soil and PowerWater DNA Isolation Kit (renamed to DNeasy PowerWater Kit). Impact of primer choice on the observed microbial community was illustrated by using three different primer sets targeting the V13, V34 and the V4 region of the 16S rRNA gene. Estimations of the detection limit were based on bacteria-free water samples (1 L) spiked with *Escherichia coli* cells in different concentrations [10$^1$ – 10$^6$ cells/ml].
+
+Sequencing data is available at the European Nucleotide Archive (primary accession: PRJEB26658).
+
+#### Install ampvis2 if needed
+
+```{r, eval= F}
+#install.packages("remotes")
+#remotes::install_github("MadsAlbertsen/ampvis2")
+```
+
+
+#### Load libraries
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ampvis2)
+library(vegan)
+library(readxl)
+library(knitr)
+library(ggplot2)
+library(reshape)
+```
+
+#### Load raw data
+
+Metadata for all experiments are loaded as **mymetadata** whereas OTU tables are loaded in different objects based on experiment.
+
+```{r}
+mymetadata <- read_excel("metadata_v2.xlsx", col_names = TRUE)
+
+otutable1 <- read.delim("data_paired/extdle/otutable.txt", check.names = FALSE)
+otutableV13V34 <- read.delim("data_paired/primer/otutable.txt", check.names = FALSE)
+otutableV4     <- read.delim("data_paired/primer/V4_only/otutable.txt", check.names = FALSE)
+```
+
+#### Convert to ampvis2 object
+
+OTU tables and metadata are converted into ampvis2 objects using the  **amp_load** function. For an in-depth introduction and documentaion of the ampvis2 package go to [this](https://madsalbertsen.github.io/ampvis2/index.html) webpage.
+
+```{r, warning=FALSE, message=FALSE}
+d_EXT <- amp_load(otutable = otutable1,
+              metadata = mymetadata)
+
+d_DLE <- amp_load(otutable = otutable1,
+              metadata = mymetadata)
+
+d_PRI <- amp_load(otutable = otutableV13V34,
+              metadata = mymetadata)
+
+d_V4  <- amp_load(otutable = otutableV4,
+              metadata = mymetadata)
+```
+
+#### R session info
+
+The session info is displayed for reproducibility as R and package versions are known to make a difference (and occasionally cause conflicts).
+
+```{r}
+sessionInfo()
+```
+
+## Data analysis of the extraction comparison experiment
+
+#### Subset to relevant samples
+
+samples relating only to the comparison of the two DNA extraction methods were subsetted to the object **ds**. 
+
+```{r}
+ds <- amp_subset_samples(d_EXT, Experiment == "EXT" & Type == "sample")
+```
+
+Similarly, all samples from the experiment are subsetted into the object **dss**.
+
+```{r}
+dss <- amp_subset_samples(d_EXT, Experiment == "EXT")
+```
+
+
+#### Basic stats
+
+Basic stats are listed in a table from the subset **dss**. Note that the numbers of observed OTUs are obtained from a rarefied number of reads set to 20,000. 
+
+```{r, warning=FALSE}
+amp_alphadiv(dss, rarefy = 20000) %>%
+  select(Replicate, EXTkit, EXTconc, Lib, Reads, ObservedOTUs) %>%
+  arrange(EXTkit, Replicate) %>% 
+  kable()
+```
+
+#### Visualization of amplicon data using ampvis2
+
+Initial visualization of the amplicon data by heatmap using the **amp_heatmap** function.
+
+```{r}
+a <- amp_heatmap(ds, 
+            group = "Replicate", 
+            facet = "EXTkit",
+            color_vector = c("white", "red"),
+            tax_class = "p__Proteobacteria",
+            tax_aggregate = "OTU",
+            plot_colorscale = "sqrt",
+            tax_add = "Phylum", 
+            tax_show = 25) +
+  theme(axis.text.x = element_text(color = "black", size = 12, angle = 0, hjust = 0.3),
+        axis.text.y = element_text(color = "black", size = 12))+
+  theme(strip.text.x = element_text(size = 12, face = "bold"))
+a
+```
+
+The heatmap dispays the 25 most abundant phyla across the 10 samples. A relative abundace for each phylum are displayed for each sample.
+
+The same heatmap from the extraction comparison are generrated but with genus taxonomy.
+
+```{r}
+amp_heatmap(ds, 
+            group = "Replicate", 
+            facet = "EXTkit",
+            color_vector = c("white", "red"),
+            tax_class = "p__Proteobacteria",
+            tax_aggregate = "OTU",
+            plot_colorscale = "sqrt",
+            tax_add = "Genus", 
+            tax_show = 25) +
+  theme(axis.text.x = element_text(color = "black", size = 12, angle = 0, hjust = 0.3),
+        axis.text.y = element_text(color = "black", size = 12))+
+  theme(strip.text.x = element_text(size = 12, face = "bold"))
+```
+
+```{r}
+#ggsave(filename = "Figures/Figure_1A_S.pdf", width = 350, height = 300, units = "mm", dpi = 300)
+```
+
+#### Ordination
+
+Visualization of data by ordination was carried out using non-metric multidimensional scaling (NMDS). NMDS tries to give the best representation of a pairwise dissimilarity between samples. Hence, samples located closer to each other are likely to be more similar than samples further apart. 
+
+Additional information about ordination in ampvis2 can be found [here](http://albertsenlab.org/ampvis2-ordination/).
+
+```{r, message=FALSE, warning=FALSE}
+b <- amp_ordinate(ds, 
+             type = "NMDS", 
+             sample_color_by = "EXTkit", 
+             distmeasure = "bray",
+             sample_point_size = 3,
+             transform = "hellinger") +
+  scale_color_discrete(name = "") +
+  theme(legend.position = c(0.9,0.9))
+b
+```
+
+
+#### Similarity
+
+Another visualization of the similarity/dissimilarity between the two DNA extraction methods are given below and carried out in a sample-by-sample manner. The similarity between any two samples are displayed as a percent from 0-1. 
+
+```{r}
+sort <- colnames(ds$abund) %>% sort()
+
+data_sorted <- select(ds$abund, sort) %>% t()
+
+new_names <- subset(mymetadata, Experiment == "EXT" & Type == "sample")
+
+rownames(data_sorted) <- new_names$ShortName
+
+sptrans <- decostand(data_sorted, method = "hellinger")
+
+dist_coeffs <- vegdist(sptrans, method = "bray") %>% as.matrix()
+
+dist_coeffs[upper.tri(dist_coeffs)] <- NA
+
+dist_coeffs <- as.data.frame(dist_coeffs)
+
+dist_coeffs$x <- row.names(dist_coeffs)
+
+dist_coeffs_plot <- gather(dist_coeffs, y, coeff, -x, na.rm = T) %>%
+  subset(coeff > 0)
+
+
+c <- ggplot(dist_coeffs_plot, aes(x = x, y = y, fill = 1-coeff, label = round(1-coeff, 2))) + 
+    geom_tile(stat = "identity") +
+    geom_text() +
+    xlab("") +
+    ylab("") +
+    theme_classic() +
+    scale_fill_continuous(low = "white", high = "red", limits = c(0.4,0.9)) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+          legend.position = "none")
+c
+```
+
+### Combining heatmap, ordination plot and similarity plot into one figure.
+
+In order to connect all three visualizations into one figure, the **plot_grid** function from the **cowplot** package are utilized.
+
+First, the ordination plot are arranged on top of the similarity plot.  
+
+```{r}
+bc <- cowplot::plot_grid(b, c, labels = c("B", "C"), nrow = 2)  
+```
+
+Secondly, the heatmap are arranged side by side with the combined figure from above.
+
+```{r}
+abc <- cowplot::plot_grid(a, bc, ncol = 2, labels = "A", rel_widths = c(1.2, 1))
+
+abc
+```
+
+```{r}
+#ggsave(filename = "Figures/Figure_1.pdf", width = 350, height = 300, units = "mm", dpi = 300)
+```
+
+
+## Test of primer sets targeting the V13, V34 and V4 region of the 16S rRNA gene
+
+#### Subset to relevant samples
+
+Samples relating to the primer test was subsetted into three objects based on the primer-set.
+
+```{r}
+dn <- amp_subset_samples(d_PRI, Experiment == "PRI" & Type == "sample" & Primer == "V13")
+
+dt <- amp_subset_samples(d_PRI, Experiment == "PRI" & Type == "sample" & Primer == "V34" & SampleID != "16SAMP-10003")
+
+du <- amp_subset_samples(d_V4, Experiment == "PRI" & Type == "sample")
+```
+
+Furthermore, subsets were made containing both samples and controls. **dl** for V13 and V34 samples and **dg** for V4 samples.
+
+```{r}
+dl <- amp_subset_samples(d_PRI, Experiment == "PRI")
+dg <- amp_subset_samples(d_V4, Experiment == "PRI")
+```
+
+
+#### Basic stats
+
+Basic stats were listed in a table from the subset **dl** and **dg**. Note that the numbers of observed OTUs were obtained from a rarefied number of reads set to 10,000. 
+
+```{r, warning=FALSE, message=FALSE}
+amp_alphadiv(dl, rarefy = 10000) %>%
+  select(Primer, Replicate, EXTconc, Lib, Reads, ObservedOTUs) %>%
+  arrange(Primer, Replicate) %>% 
+  kable()
+```
+
+```{r, warning=FALSE, message=FALSE}
+amp_alphadiv(dg, rarefy = 10000) %>%
+  select(Primer, Replicate, EXTconc, Lib, Reads, ObservedOTUs) %>%
+  arrange(Primer, Replicate) %>% 
+  kable()
+```
+
+#### Heatmap of the primer test
+
+Because of the data from the primer test originated from two diffetrent OTU-tables, some more advanced R-coding was required.
+
+```{r}
+heatmapleboeuf <- function(list, ...) {
+  heatmapsdata <- lapply(list, function(x) {
+    amp_heatmap(x, tax_show = "all", ...)[["data"]] %>%
+      mutate_at(.vars = vars(Display, Group), .funs = as.character)
+    })
+  
+  data <- plyr::ldply(heatmapsdata)
+  toptaxa <- data %>%
+    filter(!grepl("OTU", .$Display)) %>%
+    group_by(Display) %>%
+        summarise_at("Abundance", sum) %>%
+        arrange(desc(Abundance)) %>%
+        .[["Display"]] %>%
+        .[1:20]
+  
+  ggdata <- data %>%
+    filter(Display %in% toptaxa) %>%
+    arrange(desc(Abundance)) %>% 
+    mutate_at(vars(Display), factor, levels = rev(unique(.$Display))) %>%
+    mutate_at(vars(Abundance), round, digits = 1)
+  
+  ggplot(ggdata, 
+         aes_string(x = "Group",
+                    y = "Display",
+                    label = formatC("Abundance", format = "f", digits = 1))) +     
+    geom_tile(aes(fill = Abundance), colour = "white", size = 0.5) +
+    theme(axis.text.y = element_text(size = 12, color = "black", vjust = 0.4),
+          axis.text.x = element_text(size = 10, color = "black", vjust = 0.5, angle = 0, hjust = 0.3),
+          axis.title = element_blank(),
+          text = element_text(size = 8, color = "black"),
+          axis.line = element_blank(),
+          plot.margin = unit(c(1,1,1,1), "mm"),
+          title = element_text(size = 8),
+          panel.background = element_blank(),
+          legend.position = "none") +
+    scale_fill_gradientn(colors = c("white","red"),
+                         trans = "sqrt", 
+                         na.value = "#67A9CF",
+                         oob = scales::squish, 
+                         limits = c(0.1, max(ggdata$Abundance))) +
+    geom_text(size = 4, 
+              colour = "grey10", 
+              check_overlap = TRUE)
+}
+
+print.ggplot <- function(...) {
+  suppressWarnings(ggplot2:::print.ggplot(...))
+}
+```
+
+But eventually, a heatmap could be visualized (h/t Kasper Skytte Andersen).
+
+```{r}
+heatmapleboeuf(list(dn, dt, du), #list of ampvis2 objects to merge
+              tax_aggregate = "Phylum",
+              tax_add = "Kingdom", 
+              tax_class = "p__Proteobacteria",
+              group_by = "Replicate",
+              facet_by = "Primer") + 
+  facet_grid(reformulate("Primer"), scales = "free_x", space = "free") + 
+  theme(strip.text = element_text(size = 10, face = "bold"))
+```
+
+```{r}
+#ggsave(filename = "Figure_2.pdf", width = 250, height = 300, units = "mm", dpi = 300)
+```
+
+
+## Detection limit experiment
+
+#### Subset to relevant samples
+
+First, the **dm** object was made which is a subset of all samples related to the detection limit experiment.
+
+```{r}
+dm <- amp_subset_samples(d_DLE, Experiment == "DLE")
+```
+
+In the object **dm2**, all control samples have been filtered.
+
+```{r}
+dm2 <- amp_subset_samples(d_DLE, Experiment == "DLE" & Type == "sample")
+```
+
+**dm3** contains actual samples as well as the extraction blank and the three control replicates.
+
+```{r}
+dm3 <- amp_subset_samples(dm, SampleID != "16SAMP-13368" & SampleID != "16SAMP-13369")
+```
+
+#### Basic stats
+
+Basic stats were listed in a table from the subset **dm**. Note that the numbers of observed OTUs were obtained from a rarefied number of reads set to 20,000. 
+
+```{r, warning=FALSE, message=FALSE}
+amp_alphadiv(dm, rarefy = 20000) %>%
+  select(CellConc, Replicate, EXTconc, Lib, Reads, ObservedOTUs) %>%
+  arrange(CellConc, Replicate) %>% 
+  kable()
+```
+
+
+###Heatmap af DLE
+
+The **amp_heatmap** function was utilized to generate a heatmap (visualizing only actual samples).
+
+```{r, warning=FALSE}
+amp_heatmap(data = dm2,
+            group_by = c("CellConc", "Replicate"),
+            tax_class = "p__Proteobacteria",
+           # scale.seq = 100,
+            tax_show = 25,
+            tax_add = "Genus",
+            tax_aggregate = "OTU",
+            plot_na = T,
+            plot_colorscale = "log10",
+            color_vector = c("white", "red3"),
+            plot_values = T
+          )+
+  theme(axis.text.x = element_text(color = "black", size = 12),
+        axis.text.y = element_text(color = "black", size = 12))+facet_grid(~ CellConc, scales = "free_x", space = "free")+
+  theme(strip.text.x = element_text(size = 10, face = "bold"))+
+   theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+  scale_x_discrete(labels=c("10^1 A" = "A", "10^1 B" = "B","10^1 C" = "C", "10^2 A" = "A", "10^2 B" = "B", "10^2 C" = "C", "10^3 A" = "A", "10^3 B" = "B", "10^3 C" = "C", "10^4 A" = "A", "10^4 B" = "B", "10^4 C" = "C", "10^5 A" = "A", "10^5 B" = "B", "10^5 C" = "C", "10^6 A" = "A", "10^6 B" = "B", "10^6 C" = "C"))+
+  theme(legend.position = "none")
+```
+
+```{r}
+#ggsave(filename = "Figures/Figure_3.pdf", width = 350, height = 300, units = "mm", dpi = 300)
+```
+
+###Heatmap af DLE including controls
+
+Again the **amp_heatmap** function was utilized to generate a heatmap (also visualizing control samples). 
+```{r,warning=FALSE}
+amp_heatmap(data = dm3,
+            group_by = c("CellConc", "Replicate"),
+            tax_class = "p__Proteobacteria",
+           # scale.seq = 100,
+            tax_show = 25,
+            tax_add = "Genus",
+            tax_aggregate = "OTU",
+            plot_na = T,
+            plot_colorscale = "log10",
+            color_vector = c("white", "red3"),
+            plot_values = T
+          )+
+  theme(axis.text.x = element_text(color = "black", size = 12),
+        axis.text.y = element_text(color = "black", size = 12))+facet_grid(~ CellConc, scales = "free_x", space = "free")+
+  theme(strip.text.x = element_text(size = 10, face = "bold"))+
+   theme(axis.text.x = element_text(angle = 0, hjust = 1))+
+  scale_x_discrete(labels=c("10^1 A" = "A", "10^1 B" = "B","10^1 C" = "C", "10^2 A" = "A", "10^2 B" = "B", "10^2 C" = "C", "10^3 A" = "A", "10^3 B" = "B", "10^3 C" = "C", "10^4 A" = "A", "10^4 B" = "B", "10^4 C" = "C", "10^5 A" = "A", "10^5 B" = "B", "10^5 C" = "C", "10^6 A" = "A", "10^6 B" = "B", "10^6 C" = "C", "control A" = "A", "control B" = "B", "control C" = "C", "control D" = "D"))+
+  theme(legend.position = "none")
+```
+
+Replicate D in the control facet referes to the extraction blank.
+
+```{r}
+#ggsave(filename = "Figures/Figure_S2.pdf", width = 350, height = 300, units = "mm", dpi = 300)
+```
